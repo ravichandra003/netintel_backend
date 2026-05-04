@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import time
+import tempfile
+from pathlib import Path
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from io import BytesIO
+from werkzeug.utils import secure_filename
 
 import db_manager
 from main import analyze
@@ -26,10 +29,21 @@ def api_analyze():
     if text:
         iocs.append(analyze(text))
     for f in files:
-        path = f"/tmp/{f.filename}"
+        safe_name = secure_filename(Path(f.filename or '').name)
+        if not safe_name:
+            safe_name = 'upload.bin'
+        path = str(Path(tempfile.gettempdir()) / safe_name)
         f.save(path)
         iocs.append(analyze(path))
-    merged = iocs[-1] if iocs else analyze('')
+    if not iocs:
+        merged = analyze('')
+    else:
+        merged = {
+            "session_id": iocs[-1].get("session_id"),
+            "created_at": iocs[0].get("created_at"),
+            "iocs": [ioc for result in iocs for ioc in result.get("iocs", [])],
+            "stats": iocs[-1].get("stats", {}),
+        }
     merged['duration_ms'] = int((time.perf_counter() - start) * 1000)
     return jsonify(merged)
 
