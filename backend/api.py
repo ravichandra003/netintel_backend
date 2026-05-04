@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import time
 import tempfile
+import uuid
 from pathlib import Path
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
@@ -25,25 +27,31 @@ def api_analyze():
     start = time.perf_counter()
     text = request.form.get('text', '')
     files = request.files.getlist('files')
-    iocs = []
+    results = []
     if text:
-        iocs.append(analyze(text))
+        results.append(analyze(text))
     for f in files:
         safe_name = secure_filename(Path(f.filename or '').name)
         if not safe_name:
             safe_name = 'upload.bin'
         path = str(Path(tempfile.gettempdir()) / safe_name)
         f.save(path)
-        iocs.append(analyze(path))
-    if not iocs:
+        results.append(analyze(path))
+    if not results:
         merged = analyze('')
+    elif len(results) == 1:
+        merged = results[0]
     else:
+        session_id = str(uuid.uuid4())
         merged = {
-            "session_id": iocs[-1].get("session_id"),
-            "created_at": iocs[0].get("created_at"),
-            "iocs": [ioc for result in iocs for ioc in result.get("iocs", [])],
-            "stats": iocs[-1].get("stats", {}),
+            "session_id": session_id,
+            "created_at": results[0].get("created_at"),
+            "iocs": [ioc for result in results for ioc in result.get("iocs", [])],
+            "stats": results[-1].get("stats", {}),
         }
+        sp = db_manager.DB_ROOT / "raw/sessions" / f"{session_id}.json"
+        sp.parent.mkdir(parents=True, exist_ok=True)
+        sp.write_text(json.dumps(merged, indent=2))
     merged['duration_ms'] = int((time.perf_counter() - start) * 1000)
     return jsonify(merged)
 
